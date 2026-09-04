@@ -1,0 +1,88 @@
+name: Build VisionClaw IPA with OpenRouter
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Patch VisionClaw for OpenRouter + inject key
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -e
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "❌ No OPENROUTER_API_KEY secret set."
+            echo "Add it in: Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          PLACEHOLDER_FILES=$(grep -rl "YOUR_API_KEY\|sk-ant-\|sk-or-v1" --include="*.swift" --include="*.plist" --include="*.xcconfig" . || true)
+          if [ -z "$PLACEHOLDER_FILES" ]; then
+            echo "⚠️ Could not auto-find API key file."
+            echo "Falling back to creating APIKey.swift"
+            mkdir -p VisionClaw
+            printf 'import Foundation\nlet apiKey = "YOUR_API_KEY"\n' > VisionClaw/APIKey.swift
+            PLACEHOLDER_FILES="VisionClaw/APIKey.swift"
+          fi
+          echo "Injecting key into: $PLACEHOLDER_FILES"
+          for f in $PLACEHOLDER_FILES; do
+            sed -i '' -e "s/sk-ant-[a-zA-Z0-9_-]*/$OPENROUTER_API_KEY/g" "$f"
+            sed -i '' -e "s/sk-or-v1-[a-zA-Z0-9_-]*/$OPENROUTER_API_KEY/g" "$f"
+            sed -i '' -e "s/YOUR_API_KEY/$OPENROUTER_API_KEY/g" "$f"
+          done
+          find . -name "*.swift" -exec sed -i '' 's#https://api.anthropic.com/v1/messages#https://openrouter.ai/api/v1/messages#g' {} +
+          find . -name "*.swift" -exec sed -i '' 's#https://api.anthropic.com#https://openrouter.ai/api/v1#g' {} +
+          find . -name "*.swift" -exec sed -i '' 's/"claude-[^"]*"/"anthropic\/claude-3.5-sonnet"/g' {} +
+          find . -name "*.swift" -exec sed -i '' "s/'claude-[^']*'/'anthropic\/claude-3.5-sonnet'/g" {} +
+          echo "✅ Patching complete"
+
+      - name: Build .app (unsigned)
+        run: |
+          if ls *.xcworkspace >/dev/null 2>&1; then
+            PROJECT_FILE=$(ls *.xcworkspace | head -1)
+            PROJECT_FLAG="-workspace"
+          elif ls *.xcodeproj >/dev/null 2>&1; then
+            PROJECT_FILE=$(ls *.xcodeproj | head -1)
+            PROJECT_FLAG="-project"
+          else
+            echo "❌ No Xcode project/workspace found"
+            exit 1
+          fi
+          echo "Project file: $PROJECT_FILE"
+          SCHEME=$(xcodebuild -list $PROJECT_FLAG "$PROJECT_FILE" 2>/dev/null | awk '/Schemes:/{found=1;next} found && NF{print $1; exit}')
+          if [ -z "$SCHEME" ]; then SCHEME="VisionClaw"; fi
+          echo "Using scheme: $SCHEME"
+          xcodebuild $PROJECT_FLAG "$PROJECT_FILE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ./build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Create unsigned .ipa
+        run: |
+          APP_PATH=$(find ./build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ No .app found — build failed"
+            exit 1
+          fi
+          mkdir -p ./ipa/Payload
+          cp -R "$APP_PATH" ./ipa/Payload/
+          cd ./ipa
+          zip -qr ../VisionClaw-OpenRouter-unsigned.ipa Payload
+          cd ..
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VisionClaw-OpenRouter-unsigned-ipa
+          path: VisionClaw-OpenRouter-unsigned.ipa
