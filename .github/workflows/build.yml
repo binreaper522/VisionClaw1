@@ -23,7 +23,7 @@ jobs:
           echo "PROJECT_FILE=$PROJECT_FILE" >> $GITHUB_ENV
           echo "Found project: $PROJECT_FILE"
 
-      - name: Create Secrets.swift and inject OpenRouter key
+      - name: Create Secrets.swift and patch for OpenRouter
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
@@ -33,29 +33,28 @@ jobs:
             exit 1
           fi
 
-          # Determine the source folder (where CameraAccess.swift is)
+          # Create Secrets.swift with the key
           PROJECT_DIR=$(dirname "$PROJECT_FILE")
           SRC_DIR="$PROJECT_DIR/CameraAccess"
           echo "Source dir: $SRC_DIR"
           mkdir -p "$SRC_DIR"
+          printf 'import Foundation\n\nlet apiKey = "%s"\n' "$OPENROUTER_API_KEY" > "$SRC_DIR/Secrets.swift"
+          echo "✅ Created Secrets.swift"
 
-          # Create Secrets.swift with placeholder
-          cat > "$SRC_DIR/Secrets.swift" <<EOF
-          import Foundation
-
-          let apiKey = "YOUR_API_KEY"
-          EOF
-
-          # Replace placeholder with actual key
-          sed -i '' "s/YOUR_API_KEY/$OPENROUTER_API_KEY/g" "$SRC_DIR/Secrets.swift"
-          echo "✅ Created Secrets.swift with API key"
-
-          # Patch API URL, model, and auth header in all Swift files
+          # Patch all Swift files
+          # 1. Change API URL
           find . -name "*.swift" -exec sed -i '' 's#https://api.anthropic.com/v1/messages#https://openrouter.ai/api/v1/messages#g' {} +
           find . -name "*.swift" -exec sed -i '' 's#https://api.anthropic.com#https://openrouter.ai/api/v1#g' {} +
+          # 2. Change auth header from x-api-key to Authorization: Bearer
+          find . -name "*.swift" -exec sed -i '' 's/"x-api-key"/"Authorization"/g' {} +
+          find . -name "*.swift" -exec sed -i '' 's/forHTTPHeaderField: "x-api-key"/forHTTPHeaderField: "Authorization"/g' {} +
+          # 3. Change model names
           find . -name "*.swift" -exec sed -i '' 's/"claude-[^"]*"/"anthropic\/claude-3.5-sonnet"/g' {} +
           find . -name "*.swift" -exec sed -i '' "s/'claude-[^']*'/'anthropic\/claude-3.5-sonnet'/g" {} +
-          echo "✅ Patched API endpoints and model names"
+          # 4. Prepend "Bearer " to the key value (if the code uses a variable)
+          find . -name "*.swift" -exec sed -i '' 's/"Bearer \\(apiKey)\"/"Bearer \\(apiKey)"/g' {} +  # just in case
+
+          echo "✅ Patched API endpoint, auth header, and models"
 
       - name: Build .app (unsigned)
         run: |
