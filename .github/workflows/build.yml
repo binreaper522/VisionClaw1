@@ -17,27 +17,25 @@ jobs:
         run: |
           echo "=== Root files ==="
           ls -la
-          echo "=== All .xcodeproj / .xcworkspace (recursive) ==="
+          echo "=== Xcode projects ==="
           find . \( -name "*.xcodeproj" -o -name "*.xcworkspace" \) -print
 
-      - name: Find VisionClaw project
+      - name: Find Xcode project
         run: |
           set -e
-          # Look for VisionClaw.xcodeproj anywhere, but skip samples
-          PROJECT_FILE=$(find . -name "VisionClaw.xcodeproj" -not -path "*/samples/*" | head -1)
+          # Look for the CameraAccess project (the iOS sample)
+          PROJECT_FILE=$(find . -name "CameraAccess.xcodeproj" | head -1)
           if [ -z "$PROJECT_FILE" ]; then
-            # Fallback: any project/workspace skipping samples
-            PROJECT_FILE=$(find . \( -name "*.xcodeproj" -o -name "*.xcworkspace" \) -not -path "*/samples/*" | head -1)
+            PROJECT_FILE=$(find . -name "*.xcodeproj" -o -name "*.xcworkspace" | head -1)
           fi
           if [ -z "$PROJECT_FILE" ]; then
-            echo "❌ No project found outside samples. Repo contents:"
-            find . -maxdepth 3 -type f | head -100
+            echo "❌ No Xcode project found."
             exit 1
           fi
           echo "PROJECT_FILE=$PROJECT_FILE" >> $GITHUB_ENV
           echo "✅ Found project: $PROJECT_FILE"
 
-      - name: Patch VisionClaw for OpenRouter + inject key
+      - name: Patch for OpenRouter + inject key
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
@@ -49,9 +47,10 @@ jobs:
           PLACEHOLDER_FILES=$(grep -rl "YOUR_API_KEY\|sk-ant-\|sk-or-v1" --include="*.swift" --include="*.plist" --include="*.xcconfig" . || true)
           if [ -z "$PLACEHOLDER_FILES" ]; then
             echo "⚠️ Could not auto-find API key file. Creating APIKey.swift"
-            mkdir -p VisionClaw
-            printf 'import Foundation\nlet apiKey = "YOUR_API_KEY"\n' > VisionClaw/APIKey.swift
-            PLACEHOLDER_FILES="VisionClaw/APIKey.swift"
+            # Find where CameraAccess source files live
+            TARGET_DIR=$(dirname "$PROJECT_FILE")
+            printf 'import Foundation\nlet apiKey = "YOUR_API_KEY"\n' > "$TARGET_DIR/APIKey.swift"
+            PLACEHOLDER_FILES="$TARGET_DIR/APIKey.swift"
           fi
           for f in $PLACEHOLDER_FILES; do
             echo "Injecting key into: $f"
@@ -72,11 +71,11 @@ jobs:
             *.xcworkspace) PROJECT_FLAG="-workspace" ;;
             *.xcodeproj) PROJECT_FLAG="-project" ;;
           esac
-          echo "Project: $PROJECT_FILE"
+          echo "Project file: $PROJECT_FILE"
           echo "=== Schemes ==="
           xcodebuild -list $PROJECT_FLAG "$PROJECT_FILE" 2>/dev/null || true
           SCHEME=$(xcodebuild -list $PROJECT_FLAG "$PROJECT_FILE" 2>/dev/null | awk '/Schemes:/{found=1;next} found && NF{print $1; exit}')
-          if [ -z "$SCHEME" ]; then SCHEME="VisionClaw"; fi
+          if [ -z "$SCHEME" ]; then SCHEME="CameraAccess"; fi
           echo "Using scheme: $SCHEME"
           xcodebuild $PROJECT_FLAG "$PROJECT_FILE" \
             -scheme "$SCHEME" \
@@ -103,4 +102,4 @@ jobs:
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
-
+        
