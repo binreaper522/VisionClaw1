@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Checkout code
@@ -48,30 +48,41 @@ jobs:
           find . -name "*.swift" -exec sed -i '' "s/'claude-[^']*'/'anthropic\/claude-3.5-sonnet'/g" {} +
           echo "✅ Patching complete"
 
+      - name: Find correct Xcode project
+        run: |
+          set -e
+          # 1. Prefer a project named VisionClaw.xcodeproj at root
+          PROJECT_FILE=$(find . -maxdepth 1 -name "VisionClaw.xcodeproj" | head -1)
+          if [ -z "$PROJECT_FILE" ]; then
+            # 2. Fallback: any xcodeproj/workspace at root (not in samples)
+            PROJECT_FILE=$(find . -maxdepth 1 \( -name "*.xcodeproj" -o -name "*.xcworkspace" \) | head -1)
+          fi
+          if [ -z "$PROJECT_FILE" ]; then
+            # 3. Last fallback: any project that is not in samples folder
+            PROJECT_FILE=$(find . -name "*.xcodeproj" -o -name "*.xcworkspace" | grep -v "/samples/" | head -1)
+          fi
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "❌ Could not find a proper Xcode project."
+            exit 1
+          fi
+          echo "PROJECT_FILE=$PROJECT_FILE" >> $GITHUB_ENV
+          echo "Using project: $PROJECT_FILE"
+
+          # Determine flag
+          case "$PROJECT_FILE" in
+            *.xcworkspace) echo "PROJECT_FLAG=-workspace" >> $GITHUB_ENV ;;
+            *.xcodeproj) echo "PROJECT_FLAG=-project" >> $GITHUB_ENV ;;
+          esac
+
+      - name: List schemes
+        run: |
+          echo "=== Available schemes for $PROJECT_FILE ==="
+          xcodebuild -list $PROJECT_FLAG "$PROJECT_FILE" 2>/dev/null || true
+
       - name: Build .app (unsigned)
         run: |
           set -e
-          # Find the project/workspace recursively
-          PROJECT_FILE=$(find . -name "*.xcodeproj" -o -name "*.xcworkspace" | head -1)
-          if [ -z "$PROJECT_FILE" ]; then
-            echo "❌ No .xcodeproj or .xcworkspace found anywhere in repo"
-            echo "Files in repo:"
-            find . -maxdepth 2 -type f | head -50
-            exit 1
-          fi
-          echo "Project file found: $PROJECT_FILE"
-
-          # Determine whether it's a workspace or project
-          case "$PROJECT_FILE" in
-            *.xcworkspace) PROJECT_FLAG="-workspace" ;;
-            *.xcodeproj) PROJECT_FLAG="-project" ;;
-          esac
-
-          # List schemes
-          echo "=== Available schemes ==="
-          xcodebuild -list $PROJECT_FLAG "$PROJECT_FILE" 2>/dev/null || true
-
-          # Pick first scheme
+          # Use the first scheme, or VisionClaw if present
           SCHEME=$(xcodebuild -list $PROJECT_FLAG "$PROJECT_FILE" 2>/dev/null | awk '/Schemes:/{found=1;next} found && NF{print $1; exit}')
           if [ -z "$SCHEME" ]; then SCHEME="VisionClaw"; fi
           echo "Using scheme: $SCHEME"
