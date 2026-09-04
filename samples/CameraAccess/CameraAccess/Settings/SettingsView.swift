@@ -46,6 +46,43 @@ struct SettingsView: View {
   @State private var accountEmail: String?
   @State private var showResetConfirmation = false
   @State private var gatewayStatus: GatewayStatus = .checking
+  @State private var selectedPhoto: PhotosPickerItem? = nil
+@State private var selectedImageData: Data? = nil
+    var body: some View {
+        VStack {
+            if let selectedImageData, let uiImage = UIImage(data: selectedImageData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                // Your existing camera preview here
+                Text("Live camera preview")
+            }
+
+            HStack {
+                // How to take a photo (already in VisionClaw)
+                // Keep your existing button
+
+                // NEW: pick from photo library
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.largeTitle)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.gray.opacity(0.7))
+                        .clipShape(Circle())
+                }
+                .onChange(of: selectedPhoto) { newItem in
+                    Task {
+                        if let data = try? await newItem?.loadTransferable(type: Data.self) {
+                            selectedImageData = data
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
   // Applies immediately rather than on Save: the root view observes the same
   // key and swaps the capture pipeline live.
   @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
