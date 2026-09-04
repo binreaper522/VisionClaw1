@@ -109,7 +109,7 @@ jobs:
             -derivedDataPath ./build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            PRODUCT_BUNDLE_IDENTIFIER=com.yourname.visionclaw \
+            PRODUCT_BUNDLE_IDENTIFIER=com.binreaper.visionclaw \
             IPHONEOS_DEPLOYMENT_TARGET=15.0 \
             build
 
