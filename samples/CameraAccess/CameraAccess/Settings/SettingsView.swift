@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 /// Reachability of the hosted gateway, resolved by an actual authenticated
 /// request. "Configured" and "working" are different things -- a wrong token
